@@ -9,6 +9,7 @@
 *.pch
 
 # Executables
+/build/*
 *.exe
 *.out
 *.app
