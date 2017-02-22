@@ -1,172 +1,535 @@
-/*
-********************************************************************************
-** @file   repo/wep-cracker/src/main.cpp
-** @author eden barby
-** @date   22nd december 2016
-** @brief  
-********************************************************************************
-** external functions
-********************************************************************************
-** 
-********************************************************************************
-*/
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <sstream>
+#include <iostream>
+#include <unordered_map>
+
+#include "generator.h"
+#include "rivest_cipher_4.h"
+
+// std::vector<int> iv = {0, 0, 254};
+
+// std::vector<int> stateInitial;
+
+// std::unordered_map<int, bool> isResolved;
+// std::unordered_map<int, std::vector<int>> resolvedIVs;
+
+// int targetJ;
+// std::vector<int> targetState;
+
+// Generator gen;
 
 
-/* includes *******************************************************************/
 
-#include <stderr.h>
-
-#include <pcap.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-
-/* private typedefs ***********************************************************/
-/* private defines ************************************************************/
-/* private macros *************************************************************/
-/* private variables **********************************************************/
-/* private function prototypes ************************************************/
-
-static int init(char *interface, pcap_t **pcap_handle);
-static void pcap_callback(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes);
-
-
-int main(int argc, char** argv) {
-    int error_code;
-    pcap_t *pcap_handle;
-
-    if(argc != 2) {
-        fprintf(stderr, "Usage: %s [Network Interface]\n", argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-    error_code = init(argv[1], &pcap_handle);
-    if(error_code != 0) {
-        fprintf(stderr, "Initialization failed.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    pcap_loop(pcap_handle, 0, pcap_callback, "eden");
+int hash_iv(std::array<int, 3> iv) {
+    return (256 * 256 * iv.at(0)) + (256 * iv.at(1)) + (iv.at(2));
 }
 
-/*
-** @brief
-** @param
-** @retval
-*/
-static int init(char *interface, pcap_t **pcap_handle) {
-    int error_code;
-    char error_buffer[PCAP_ERRBUF_SIZE];
+bool is_resolved(std::vector<int> key, int &j, std::array<int, 256> &state) {
+    int i, tmp;
 
-    (*pcap_handle) = pcap_create(interface, error_buffer);
-    if((*pcap_handle) == NULL) {
-        fprintf(stderr, "%s\n", error_buffer);
-        return 1;
+    if(key.size() < 3 || key.size() > 50) {
+        std::cout << "is_resolved: unusual key size (" << key.size() << ")." << std::endl;
     }
 
-    printf("Attempting enable monitor mode...");
-    error_code = pcap_can_set_rfmon((*pcap_handle));
-    if(error_code == 1) {
-        pcap_set_rfmon((*pcap_handle), 1);
-    } else if(error_code == 0) {
-        fprintf(stderr, "%s does not support monitor mode.\n", interface);
-        return 1;
-    } else if(error_code < 0) {
-        switch(error_code) {
-        case PCAP_ERROR_NO_SUCH_DEVICE:
-            fprintf(stderr, "No such device.");
-            break;
-
-        case PCAP_ERROR_PERM_DENIED:
-            fprintf(stderr, "Permission denied.");
-            break;
-
-        case PCAP_ERROR_ACTIVATED:
-            fprintf(stderr, "Capture handle has already been activated.");
-            break;
-
-        case PCAP_ERROR:
-            fprintf(stderr, "%s", pcap_geterr((*pcap_handle)));
-            break;
-
-        default:
-            fprintf(stderr, "%s", pcap_statustostr(error_code));
-            break;
-        }
-        fprintf(stderr, "\n");
-        return 1;
-    }
-    printf("Success.\n");
-
-    error_code = pcap_set_snaplen((*pcap_handle), 65535);
-    if(error_code != 0) {
-        fprintf(stderr, "%s\n", pcap_statustostr(error_code));
-        return 1;
+    j = 0;
+    for(i = 0; i < key.size(); i++) {
+        j = (j + state.at(i) + key.at(i)) % 256;
+        tmp = state.at(i);
+        state.at(i) = state.at(j);
+        state.at(j) = tmp;
     }
 
-    error_code = pcap_set_timeout((*pcap_handle), 5000);
-    if(error_code != 0) {
-        fprintf(stderr, "%s\n", pcap_statustostr(error_code));
-        return 1;
+    if(state.at(1) < key.size() &&
+            (state.at(1) + state.at(state.at(1))) == key.size()) {
+        return true;
+    }
+    return false;
+}
+
+int get_next_key_word(std::vector<int> key) {
+    int j, resolvedCount, resolvedTarget, nextKey;
+    std::array<int, 3> iv;
+    std::array<int, 256> state, stateInitial, votes;
+    std::vector<int> knownKey;
+    Generator gen;
+
+    resolvedCount = 0;
+    resolvedTarget = 200;
+
+    std::fill(votes.begin(), votes.end(), 0);
+
+    for(int i = 0; i < 256; i++) {
+        stateInitial.at(i) = i;
     }
 
-    printf("Attempting to activate interface...");
-    error_code = pcap_activate((*pcap_handle));
-    if(error_code < 0) {
-        switch(error_code) {
-        case PCAP_ERROR:
-            fprintf(stderr, "%s", pcap_geterr((*pcap_handle)));
-            break;
+    while(1) {
+        printf("Resolved IVs found: ");
+        while(resolvedCount < resolvedTarget) {
+            // knownKey = gen.next_iv();
+            gen.next_iv(iv);
+            knownKey = std::vector<int>();
+            knownKey.insert(knownKey.end(), iv.begin(), iv.end());
+            knownKey.insert(knownKey.end(), key.begin(), key.end());
 
-        default:
-            fprintf(stderr, "%s\n", pcap_statustostr(error_code));
-            break;
-        }
-        printf("\n");
-        return 1;
-    }
-    printf("Success.\n");
-    if(error_code > 0) {
-        printf("Warning %i:", error_code);
+            // for(auto i : iv) {
+            //     std::cout << i << " ";
+            // }
+            // std::cout << std::endl;
 
-        switch(error_code) {
-        case PCAP_WARNING:
-            fprintf(stderr, "%s", pcap_geterr((*pcap_handle)));
-            break;
+            state = std::array<int, 256>(stateInitial);
+            if(is_resolved(knownKey, j, state)) {
+                resolvedCount++;
 
-        default:
-            fprintf(stderr, "%s\n", pcap_statustostr(error_code));
-            break;
+                int output = gen.get_output(iv);
+                int outputIndex;
+                for(outputIndex = 0; outputIndex < state.size(); outputIndex++) {
+                    if(state.at(outputIndex) == output) break;
+                }
+                if(outputIndex == state.size()) {
+                    std::cout << "get_next_key_word: could not find output in state (" << output << ")." << std::endl;
+                }
+
+                int vote = (outputIndex - j - state.at(knownKey.size())) % 256;
+                if(vote < 0) vote += 256;
+                votes.at(vote) += 1;
+
+                if(resolvedCount % 10 == 0) {
+                    std::cout << resolvedCount << " " << std::flush;
+                }
+            }
         }
 
-        printf("\n");
+        int count, highestVote, highestVoteIndex, secondHighestVote;
+        double averageVote;
+
+        printf("\nSufficient resolved IVs found, attempting to determine the key word.\n");
+
+        highestVote = 0;
+        secondHighestVote = 0;
+        averageVote = 0;
+        for(int i = 0; i < votes.size(); i++) {
+            count = votes.at(i);
+            if(highestVote < count) {
+                highestVote = count;
+                highestVoteIndex = i;
+            } else if(secondHighestVote < count) {
+                secondHighestVote = count;
+            }
+            averageVote += count;
+        }
+        averageVote /= 256;
+
+        // for(int i = 0; i < votes.size(); i++) {
+        //     printf("%i: %i\n", i, votes.at(i));
+        // }
+        // printf("Highest vote: %i (%i)\n", highestVote, highestVoteIndex);
+        // printf("Second highest vote: %i\n", secondHighestVote);
+        // printf("Average vote: %f\n", averageVote);
+
+        if(highestVote > 8 * averageVote && highestVote > 1.5 * secondHighestVote) {
+            return highestVoteIndex;
+        }
+
+        resolvedTarget += 200;
     }
 }
 
-/*
-** @brief
-** @param
-** @retval
-*/
-static void pcap_callback(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes) {
-    uint8_t *frame = (uint8_t *)bytes;
-    struct ieee80211_radiotap_header *radiotap_header;
+int main(int argc, char **argv) {
+    int keyWord;
+    std::vector<int> key;
 
-    // Check that first 8 bytes is a valid radio tap header.
-    // radiotap_header.it_version = frame[0];
-    // radiotap_header.it_pad     = frame[1];
-    // radiotap_header.it_len     = le16toh((uint16_t)frame[2]);
-    // radiotap_header.it_present = le32toh((uint32_t)frame[4]);
-
-    radiotap_header = (struct ieee80211_radiotap_header *)bytes;
-
-    if((radiotap_header.it_version != 0) || (radiotap_header.it_pad != 0)
-        || (radiotap_header.it_len < 8)) {
-        return;
+    for(int i = 0; i < 11; i++) {
+        printf("Searching...\n");
+        keyWord = get_next_key_word(key);
+        key.push_back(keyWord);
+        printf("The %ith key word found: %i\n", i+1, keyWord);
     }
+
+    printf("Done! The key is [ ");
+    for(auto i : key) {
+        printf("%c ", i);
+    }
+    printf("].\n");
+
+
+
+
+    // std::string str;
+    // std::stringstream ss;
+    // std::array<int, 3> iv;
+    // std::vector<int> knownKey;
+    // std::vector<std::array<int, 3>> ivs;
+    // Generator gen;
+
+    // for(int i = 0; i < 256; i++) {
+    //     stateInitial.push_back(i);
+    // }
+
+    // for(int i = 0; i < 256*256*256; i++) {
+    //     ss = std::stringstream();
+    //     gen.next_iv(iv);
+    //     knownKey = std::vector<int>(iv.begin(), iv.end());
+
+    //     if(resolved_check(knownKey)) {
+    //         ss << " 1";
+    //     }
+    //     if(resolved_check2(knownKey)) {
+    //         ss << " 2";
+    //     }
+    //     if(resolved_check3(knownKey)) {
+    //         ss << " 3";
+    //     }
+
+    //     if(ss.str().size() > 0) {
+    //         for(auto i : knownKey) {
+    //             std::cout << i << " ";
+    //         }
+    //         std::cout << ss.str() << std::endl;
+    //     }
+    //     // for(auto i : knownKey) {
+    //     //     std::cout << i << " ";
+    //     // }
+    //     // std::cout << ss.str() << std::endl;
+    // }
+
+
+
+
+
+
+
+
+
+
+
+    // int a, b, c;
+    // int radix = 256;
+    // int i = 0;
+    // std::vector<int> iv1 = {0, 0 ,0};
+    // std::vector<int> iv2 = {0, 0 ,0};
+    // Generator gen2;
+
+    // auto t1 = std::chrono::high_resolution_clock::now();
+    // for(int i = 0; i < 1000000; i++) {
+    //     iv1.at(0) = (int)(i / (256 * 256));
+
+    //     iv1.at(1) = (int)(i / (256)) - 256 * iv1.at(0);
+
+    //     iv1.at(2) = i - 256 * iv1.at(1) - 256 * 256 * iv1.at(0);
+
+    //     // for(auto i : iv1) {
+    //     //     std::cout << i << " ";
+    //     // }
+    //     // std::cout << std::endl;
+    // }
+    // auto t2 = std::chrono::high_resolution_clock::now();
+
+    // auto t3 = std::chrono::high_resolution_clock::now();
+    // for(int i = 0; i < 1000000; i++) {
+    //     a = (int)(i / (256 * 256));
+    //     if(a == 0) {
+    //         b = (int)(i / 256);
+    //         if(b == 0) {
+    //             c = i;
+    //         } else {
+    //             c = i - 256 * b;
+    //         }
+    //     } else {
+    //         b = (int)(i / 256) - 256 * a;
+    //         if(b == 0) {
+    //             c = i - 256 * 256 * c;
+    //         } else {
+    //             c = i - 256 * b - 256 * 256 * c;
+    //         }
+    //     }
+
+    //     iv2.at(0) = a;
+    //     iv2.at(1) = b;
+    //     iv2.at(2) = c;
+
+    //     // for(auto i : iv2) {
+    //     //     std::cout << i << " ";
+    //     // }
+    //     // std::cout << std::endl;
+
+    //     // i++;
+    // }
+    // auto t4 = std::chrono::high_resolution_clock::now();
+
+    // std::cout << "Method 1: " 
+    //           << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()
+    //           << " ms" << std::endl;
+
+    // std::cout << "Method 2: " 
+    //           << std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()
+    //           << " ms" << std::endl;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // bool resolved;
+    // std::vector<int> iv;
+    // Generator gen = Generator();
+
+    // for(int i = 0; i < 256; i++) {
+    //     stateInitial.push_back(i);
+    // }
+
+    // for(int i = 0; i < 5 * (256*256*256); i++) {
+    //     iv = gen.next_iv();
+    //     resolved = false;
+
+    //     if(i > 1 * (256*256*256)) {
+    //         auto search = isResolved.find(hash_iv(iv));
+    //         if(search == isResolved.end()) {
+    //             if(resolved_check(iv)) {
+    //                 isResolved.emplace(hash_iv(iv), true);
+    //                 resolvedIVs.emplace(hash_iv(iv), iv);
+    //                 resolved = true;
+    //             } else {
+    //                 isResolved.emplace(hash_iv(iv), false);
+    //             }
+    //         } else {
+    //             if(search->second) {
+    //                 resolved = true;
+    //             }
+    //         }
+    //     } else {
+    //         if(resolved_check(iv)) {
+    //             isResolved.emplace(hash_iv(iv), true);
+    //             resolvedIVs.emplace(hash_iv(iv), iv);
+    //             resolved = true;
+    //         } else {
+    //             isResolved.emplace(hash_iv(iv), false);
+    //         }
+    //     }
+
+    //     if(resolved) {
+    //         for(auto i : iv) {
+    //             std::cout << i << " ";
+    //         }
+    //         std::cout << std::endl;
+    //     }
+    // }
+
+
+    // isResolved.emplace(1, true);
+    // isResolved.emplace(10, true);
+    // isResolved.emplace(100, true);
+    // isResolved.emplace(1000, true);
+
+    // auto search = isResolved.find(100);
+    // if(search != isResolved.end()) {
+    //     std::cout << "Found " << search->first << " " << search->second << '\n';
+    // }
+    // else {
+    //     std::cout << "Not found\n";
+    // }
+
+
+    // if(isResolved.at(2)) std::cout << isResolved.at(2) << std::endl;
+
 
     
+
+    // // WiredEquivalentPrivacy(iv, key);
+    // std::vector<int> iv = {0, 0, 0};
+
+    // for(int i = 0; i < 256; i++) {
+    //     stateInitial.push_back(i);
+    // }
+
+    // for(int i = 0; i < (256*256*256); i++) {
+    //     if(resolved_check(iv)) {
+    //         for(auto i : iv) {
+    //             std::cout << i << " ";
+    //         }
+    //         std::cout << std::endl;
+    //     }
+
+    //     next(iv);
+    // }
 }
+
+
+
+
+
+
+
+
+// /* includes *******************************************************************/
+
+// #include <pcap.h>
+
+// #include <stdio.h>
+// #include <stdlib.h>
+
+// /* private typedefs ***********************************************************/
+// /* private defines ************************************************************/
+// /* private macros *************************************************************/
+// /* private variables **********************************************************/
+// /* private function prototypes ************************************************/
+
+// static int init(char *interface, pcap_t **pcap_handle);
+// static void pcap_callback(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes);
+
+
+// int main(int argc, char** argv) {
+//     int error_code;
+//     pcap_t *pcap_handle;
+
+//     if(argc != 2) {
+//         fprintf(stderr, "Usage: %s [Network Interface]\n", argv[0]);
+//         exit(EXIT_FAILURE);
+//     }
+
+//     error_code = init(argv[1], &pcap_handle);
+//     if(error_code != 0) {
+//         fprintf(stderr, "Initialization failed.\n");
+//         exit(EXIT_FAILURE);
+//     }
+
+//     pcap_loop(pcap_handle, 0, pcap_callback, "eden");
+// }
+
+// /*
+// ** @brief
+// ** @param
+// ** @retval
+// */
+// static int init(char *interface, pcap_t **pcap_handle) {
+//     int error_code;
+//     char error_buffer[PCAP_ERRBUF_SIZE];
+
+//     (*pcap_handle) = pcap_create(interface, error_buffer);
+//     if((*pcap_handle) == NULL) {
+//         fprintf(stderr, "%s\n", error_buffer);
+//         return 1;
+//     }
+
+//     printf("Attempting enable monitor mode...");
+//     error_code = pcap_can_set_rfmon((*pcap_handle));
+//     if(error_code == 1) {
+//         pcap_set_rfmon((*pcap_handle), 1);
+//     } else if(error_code == 0) {
+//         fprintf(stderr, "%s does not support monitor mode.\n", interface);
+//         return 1;
+//     } else if(error_code < 0) {
+//         switch(error_code) {
+//         case PCAP_ERROR_NO_SUCH_DEVICE:
+//             fprintf(stderr, "No such device.");
+//             break;
+
+//         case PCAP_ERROR_PERM_DENIED:
+//             fprintf(stderr, "Permission denied.");
+//             break;
+
+//         case PCAP_ERROR_ACTIVATED:
+//             fprintf(stderr, "Capture handle has already been activated.");
+//             break;
+
+//         case PCAP_ERROR:
+//             fprintf(stderr, "%s", pcap_geterr((*pcap_handle)));
+//             break;
+
+//         default:
+//             fprintf(stderr, "%s", pcap_statustostr(error_code));
+//             break;
+//         }
+//         fprintf(stderr, "\n");
+//         return 1;
+//     }
+//     printf("Success.\n");
+
+//     error_code = pcap_set_snaplen((*pcap_handle), 65535);
+//     if(error_code != 0) {
+//         fprintf(stderr, "%s\n", pcap_statustostr(error_code));
+//         return 1;
+//     }
+
+//     error_code = pcap_set_timeout((*pcap_handle), 5000);
+//     if(error_code != 0) {
+//         fprintf(stderr, "%s\n", pcap_statustostr(error_code));
+//         return 1;
+//     }
+
+//     printf("Attempting to activate interface...");
+//     error_code = pcap_activate((*pcap_handle));
+//     if(error_code < 0) {
+//         switch(error_code) {
+//         case PCAP_ERROR:
+//             fprintf(stderr, "%s", pcap_geterr((*pcap_handle)));
+//             break;
+
+//         default:
+//             fprintf(stderr, "%s\n", pcap_statustostr(error_code));
+//             break;
+//         }
+//         printf("\n");
+//         return 1;
+//     }
+//     printf("Success.\n");
+//     if(error_code > 0) {
+//         printf("Warning %i:", error_code);
+
+//         switch(error_code) {
+//         case PCAP_WARNING:
+//             fprintf(stderr, "%s", pcap_geterr((*pcap_handle)));
+//             break;
+
+//         default:
+//             fprintf(stderr, "%s\n", pcap_statustostr(error_code));
+//             break;
+//         }
+
+//         printf("\n");
+//     }
+// }
+
+// /*
+// ** @brief
+// ** @param
+// ** @retval
+// */
+// static void pcap_callback(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes) {
+//     uint8_t *frame = (uint8_t *)bytes;
+//     struct ieee80211_radiotap_header *radiotap_header;
+
+//     // Check that first 8 bytes is a valid radio tap header.
+//     // radiotap_header.it_version = frame[0];
+//     // radiotap_header.it_pad     = frame[1];
+//     // radiotap_header.it_len     = le16toh((uint16_t)frame[2]);
+//     // radiotap_header.it_present = le32toh((uint32_t)frame[4]);
+
+//     radiotap_header = (struct ieee80211_radiotap_header *)bytes;
+
+//     if((radiotap_header.it_version != 0) || (radiotap_header.it_pad != 0)
+//         || (radiotap_header.it_len < 8)) {
+//         return;
+//     }
+
+    
+// }
 
 
 
