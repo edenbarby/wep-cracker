@@ -14,6 +14,8 @@
 
 /* includes *******************************************************************/
 
+#include <stderr.h>
+
 #include <pcap.h>
 
 #include <stdio.h>
