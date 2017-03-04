@@ -11,7 +11,8 @@ class Generator {
 
 public:
 
-    Generator();
+    Generator(std::vector<int> secretKey);
+    void next(int &output, std::array<int, 3> &iv);
     void next_iv(std::array<int, 3> &iv);
     int get_output(std::array<int, 3> iv);
 
