@@ -1,3 +1,5 @@
+#include <cstring>
+
 #include <pcap.h>
 
 // #include <arpa/inet.h>
@@ -14,9 +16,9 @@
 
 #include "radiotap/radiotap.h"
 
+void packet_received_callback(u_char *config, const struct pcap_pkthdr *header, const u_char *packet);
 void parse(const u_char *packet);
 char * byte_to_string(uint8_t byte);
-
 
 
 int main(int argc, char** argv) {
@@ -28,12 +30,10 @@ int main(int argc, char** argv) {
     struct pcap_pkthdr pcap_header;
     struct ether_header *ethernet_header;
 
-    // device_name = pcap_lookupdev(error_buffer);
-    // if(device_name == NULL) {
-    //     printf("%s\n", error_buffer);
-    //     return 1;
-    // }
-    // printf("Using device: %s\n", device_name);
+    if(argc != 2) {
+        printf("Usage: %s [device]\n", argv[0]);
+        return 1;
+    }
 
     device_handle = pcap_create(argv[1], error_buffer);
     if(device_handle == NULL) {
@@ -76,23 +76,11 @@ int main(int argc, char** argv) {
     }
     printf("Monitor mode set.\n");
 
-    // errno = pcap_set_snaplen(device_handle, 1);
-    // if(errno != 0) {
-    //     printf("%s\n", pcap_statustostr(errno));
-    //     return 1;
-    // }
-
     errno = pcap_set_timeout(device_handle, 5000);
     if(errno != 0) {
         printf("%s\n", pcap_statustostr(errno));
         return 1;
     }
-
-    // errno = pcap_set_buffer_size(device_handle, (2*1024*1024));
-    // if(errno != 0) {
-    //     printf("%s\n", pcap_statustostr(errno));
-    //     return 1;
-    // }
 
     errno = pcap_activate(device_handle);
     if(errno < 0) {
@@ -124,22 +112,61 @@ int main(int argc, char** argv) {
         printf("\n");
     }
 
-    packet = pcap_next(device_handle, &pcap_header);
-    if(packet == NULL) {
-        printf("No packet grabbed!\n");
-        return 1;
+    pcap_loop(device_handle, 4, packet_received_callback, NULL);
+
+    // packet = pcap_next(device_handle, &pcap_header);
+    // if(packet == NULL) {
+    //     printf("No packet grabbed!\n");
+    //     return 1;
+    // }
+
+    // printf("Packet grabbed!\n");
+    // printf("Packet length: %d\n", pcap_header.len);
+    // printf("Received at: %s", ctime((const time_t*)&pcap_header.ts.tv_sec));
+    // printf("Packet:\n");
+    // printf("Byte  Hex   Bin\n");
+    // for(int i = 0; i < pcap_header.len; i++) {
+    //     printf("%4i  0x%02x  %s\n", i, packet[i], byte_to_string(packet[i]));
+    // }
+
+    // parse(packet);
+}
+
+void packet_received_callback(u_char *config, const struct pcap_pkthdr *header, const u_char *packet) {
+    uint16_t radiotap_header_length = le16toh((uint16_t)packet[2]);
+    uint8_t radiotap_header[radiotap_header_length];
+    std::memcpy(radiotap_header, packet, radiotap_header_length);
+
+    uint8_t frame[header->len - radiotap_header_length];
+    std::memcpy(frame, (packet + radiotap_header_length), header->len - radiotap_header_length);
+
+    uint16_t frame_control = le16toh((uint16_t)frame[0]);
+
+    printf("packet length: %d ", header->len);
+    printf("radiotap header length: %d ", radiotap_header_length);
+
+    printf("type: ");
+    switch((frame_control >> 2) & 0x3) {
+        case 0:
+            printf("management ");
+            break;
+        case 1:
+            printf("control ");
+            break;
+        case 2:
+            printf("data ");
+            break;
     }
 
-    printf("Packet grabbed!\n");
-    printf("Packet length: %d\n", pcap_header.len);
-    printf("Received at: %s", ctime((const time_t*)&pcap_header.ts.tv_sec));
+    if(frame_control & 0x0100) printf("to ds ");
+    if(frame_control & 0x0200) printf("from ds ");
+
+    
     printf("Packet:\n");
     printf("Byte  Hex   Bin\n");
-    for(int i = 0; i < pcap_header.len; i++) {
+    for(int i = 0; i < header->len; i++) {
         printf("%4i  0x%02x  %s\n", i, packet[i], byte_to_string(packet[i]));
     }
-
-    parse(packet);
 }
 
 
