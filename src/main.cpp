@@ -1,55 +1,47 @@
-#include <cstring>
+#include <iostream>
+#include <set>
+#include <string>
 
-#include <pcap.h>
 
-// #include <arpa/inet.h>
-// #include <netinet/if_ether.h>
-// #include <netinet/in.h>
-// #include <sys/socket.h>
-#include <endian.h>
-
-// #include <errno.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-
-#include "radiotap/radiotap.h"
-
+int initialize(char *device_name, pcap_t &device_handle);
 void packet_received_callback(u_char *config, const struct pcap_pkthdr *header, const u_char *packet);
-void parse(const u_char *packet);
-char * byte_to_string(uint8_t byte);
-
 
 int main(int argc, char** argv) {
-    int errno;
-    char *device_name;
-    char error_buffer[PCAP_ERRBUF_SIZE];
-    pcap_t *device_handle;
-    const u_char *packet;
-    struct pcap_pkthdr pcap_header;
-    struct ether_header *ethernet_header;
+    pcap_t device_handle;
 
     if(argc != 2) {
         printf("Usage: %s [device]\n", argv[0]);
         return 1;
     }
 
-    device_handle = pcap_create(argv[1], error_buffer);
-    if(device_handle == NULL) {
-        printf("%s\n", error_buffer);
+    printf("Initializing %s...", argv[1]);
+    status = initialize(argv[1], device_handle);
+    if(status != 0) {
         return 1;
     }
-    printf("Device handle created.\n");
+    printf("done.\n");
+
+    pcap_loop(&device_handle, 4, packet_received_callback, NULL);
+}
+
+int initialize(char *device_name, pcap_t &device_handle) {
+    int errno;
+    char error_buffer[PCAP_ERRBUF_SIZE];
+
+    device_handle = pcap_create(device_name, error_buffer);
+    if(device_handle == NULL) {
+        printf("\nFailed to create device handle: %s\n", error_buffer);
+        return 1;
+    }
 
     errno = pcap_can_set_rfmon(device_handle);
     if(errno == 1) {
         pcap_set_rfmon(device_handle, 1);
     } else if(errno == 0) {
-        printf("Device does not support monitor mode.\n");
+        printf("\nDevice does not support monitor mode.\n");
         return 1;
     } else if(errno < 0) {
-        printf("Error %i: ", errno);
+        printf("\nError %i: ", errno);
         switch(errno) {
             case PCAP_ERROR_NO_SUCH_DEVICE:
             printf("No such device.");
@@ -74,17 +66,16 @@ int main(int argc, char** argv) {
         printf("\n");
         return 1;
     }
-    printf("Monitor mode set.\n");
 
     errno = pcap_set_timeout(device_handle, 5000);
     if(errno != 0) {
-        printf("%s\n", pcap_statustostr(errno));
+        printf("\n%s\n", pcap_statustostr(errno));
         return 1;
     }
 
     errno = pcap_activate(device_handle);
     if(errno < 0) {
-        printf("Error %i: ", errno);
+        printf("\nError %i: ", errno);
         switch(errno) {
             case PCAP_ERROR:
             printf("%s", pcap_geterr(device_handle));
@@ -97,9 +88,9 @@ int main(int argc, char** argv) {
         printf("\n");
         return 1;
     }
-    printf("Network device activated successfully.\n");
+
     if(errno > 0) {
-        printf("Warning %i:", errno);
+        printf("\nWarning %i:", errno);
         switch(errno) {
             case PCAP_WARNING:
             printf("%s", pcap_geterr(device_handle));
@@ -111,191 +102,355 @@ int main(int argc, char** argv) {
         }
         printf("\n");
     }
-
-    pcap_loop(device_handle, 4, packet_received_callback, NULL);
-
-    // packet = pcap_next(device_handle, &pcap_header);
-    // if(packet == NULL) {
-    //     printf("No packet grabbed!\n");
-    //     return 1;
-    // }
-
-    // printf("Packet grabbed!\n");
-    // printf("Packet length: %d\n", pcap_header.len);
-    // printf("Received at: %s", ctime((const time_t*)&pcap_header.ts.tv_sec));
-    // printf("Packet:\n");
-    // printf("Byte  Hex   Bin\n");
-    // for(int i = 0; i < pcap_header.len; i++) {
-    //     printf("%4i  0x%02x  %s\n", i, packet[i], byte_to_string(packet[i]));
-    // }
-
-    // parse(packet);
 }
 
 void packet_received_callback(u_char *config, const struct pcap_pkthdr *header, const u_char *packet) {
-    uint16_t radiotap_header_length = le16toh((uint16_t)packet[2]);
-    uint8_t radiotap_header[radiotap_header_length];
-    std::memcpy(radiotap_header, packet, radiotap_header_length);
+    
+}
 
-    uint8_t frame[header->len - radiotap_header_length];
-    std::memcpy(frame, (packet + radiotap_header_length), header->len - radiotap_header_length);
 
-    uint16_t frame_control = le16toh((uint16_t)frame[0]);
 
-    printf("packet length: %d ", header->len);
-    printf("radiotap header length: %d ", radiotap_header_length);
+// #include <iostream>
+// #include <set>
+// #include <string>
 
-    printf("type: ");
-    switch((frame_control >> 2) & 0x3) {
-        case 0:
-            printf("management ");
-            break;
-        case 1:
-            printf("control ");
-            break;
-        case 2:
-            printf("data ");
-            break;
-    }
+// #include "mac_address.h"
 
-    if(frame_control & 0x0100) printf("to ds ");
-    if(frame_control & 0x0200) printf("from ds ");
+// int main(int argc, char** argv) {
+//     uint8_t address[6];
+//     address[0] = 0x00;
+//     address[1] = 0x11;
+//     address[2] = 0x22;
+//     address[3] = 0x33;
+//     address[4] = 0x44;
+//     address[5] = 0x51;
+
+//     MACAddress addr1(address);
+//     MACAddress addr2("00:11:22:33:44:51");
+//     MACAddress addr3("00:11:22:33:44:52");
+//     MACAddress addr4("00:11:22:33:44:53");
+//     MACAddress addr5("00:11:22:33:44:54");
+
+//     std::set<MACAddress> addresses;
+//     addresses.insert(addr1);
+//     addresses.insert(addr2);
+//     addresses.insert(addr3);
+//     addresses.insert(addr4);
+//     addresses.insert(addr5);
+
+//     std::cout << "The number of times '" << addr1 << "' appears is " << addresses.count(addr1) << std::endl;
+
+//     std::cout << "Search for '" << addr1 << "': ";
+//     auto search = addresses.find(addr4);
+//     if(search != addresses.end()) {
+//         std::cout << "Found." << std::endl;
+//     } else {
+//         std::cout << "Not found." << std::endl;
+//     }
+
+//     return 0;
+// }
+
+
+
+// #include <cstring>
+
+// #include <pcap.h>
+
+// // #include <arpa/inet.h>
+// // #include <netinet/if_ether.h>
+// // #include <netinet/in.h>
+// // #include <sys/socket.h>
+// #include <endian.h>
+
+// // #include <errno.h>
+// #include <stdint.h>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <time.h>
+
+// #include "radiotap/radiotap.h"
+
+// void packet_received_callback(u_char *config, const struct pcap_pkthdr *header, const u_char *packet);
+// void parse(const u_char *packet);
+// char * byte_to_string(uint8_t byte);
+
+
+// int main(int argc, char** argv) {
+//     int errno;
+//     char *device_name;
+//     char error_buffer[PCAP_ERRBUF_SIZE];
+//     pcap_t *device_handle;
+//     const u_char *packet;
+//     struct pcap_pkthdr pcap_header;
+//     struct ether_header *ethernet_header;
+
+//     if(argc != 2) {
+//         printf("Usage: %s [device]\n", argv[0]);
+//         return 1;
+//     }
+
+//     device_handle = pcap_create(argv[1], error_buffer);
+//     if(device_handle == NULL) {
+//         printf("%s\n", error_buffer);
+//         return 1;
+//     }
+//     printf("Device handle created.\n");
+
+//     errno = pcap_can_set_rfmon(device_handle);
+//     if(errno == 1) {
+//         pcap_set_rfmon(device_handle, 1);
+//     } else if(errno == 0) {
+//         printf("Device does not support monitor mode.\n");
+//         return 1;
+//     } else if(errno < 0) {
+//         printf("Error %i: ", errno);
+//         switch(errno) {
+//             case PCAP_ERROR_NO_SUCH_DEVICE:
+//             printf("No such device.");
+//             break;
+
+//             case PCAP_ERROR_PERM_DENIED:
+//             printf("Permission denied.");
+//             break;
+
+//             case PCAP_ERROR_ACTIVATED:
+//             printf("Capture handle has already been activated.");
+//             break;
+
+//             case PCAP_ERROR:
+//             printf("%s", pcap_geterr(device_handle));
+//             break;
+
+//             default:
+//             printf("%s", pcap_statustostr(errno));
+//             break;
+//         }
+//         printf("\n");
+//         return 1;
+//     }
+//     printf("Monitor mode set.\n");
+
+//     errno = pcap_set_timeout(device_handle, 5000);
+//     if(errno != 0) {
+//         printf("%s\n", pcap_statustostr(errno));
+//         return 1;
+//     }
+
+//     errno = pcap_activate(device_handle);
+//     if(errno < 0) {
+//         printf("Error %i: ", errno);
+//         switch(errno) {
+//             case PCAP_ERROR:
+//             printf("%s", pcap_geterr(device_handle));
+//             break;
+
+//             default:
+//             printf("%s", pcap_statustostr(errno));
+//             break;
+//         }
+//         printf("\n");
+//         return 1;
+//     }
+//     printf("Network device activated successfully.\n");
+//     if(errno > 0) {
+//         printf("Warning %i:", errno);
+//         switch(errno) {
+//             case PCAP_WARNING:
+//             printf("%s", pcap_geterr(device_handle));
+//             break;
+
+//             default:
+//             printf("%s", pcap_statustostr(errno));
+//             break;
+//         }
+//         printf("\n");
+//     }
+
+//     pcap_loop(device_handle, 4, packet_received_callback, NULL);
+
+//     // packet = pcap_next(device_handle, &pcap_header);
+//     // if(packet == NULL) {
+//     //     printf("No packet grabbed!\n");
+//     //     return 1;
+//     // }
+
+//     // printf("Packet grabbed!\n");
+//     // printf("Packet length: %d\n", pcap_header.len);
+//     // printf("Received at: %s", ctime((const time_t*)&pcap_header.ts.tv_sec));
+//     // printf("Packet:\n");
+//     // printf("Byte  Hex   Bin\n");
+//     // for(int i = 0; i < pcap_header.len; i++) {
+//     //     printf("%4i  0x%02x  %s\n", i, packet[i], byte_to_string(packet[i]));
+//     // }
+
+//     // parse(packet);
+// }
+
+// void packet_received_callback(u_char *config, const struct pcap_pkthdr *header, const u_char *packet) {
+//     uint16_t radiotap_header_length = le16toh((uint16_t)packet[2]);
+//     uint8_t radiotap_header[radiotap_header_length];
+//     std::memcpy(radiotap_header, packet, radiotap_header_length);
+
+//     uint8_t frame[header->len - radiotap_header_length];
+//     std::memcpy(frame, (packet + radiotap_header_length), header->len - radiotap_header_length);
+
+//     uint16_t frame_control = le16toh((uint16_t)frame[0]);
+
+//     printf("packet length: %d ", header->len);
+//     printf("radiotap header length: %d ", radiotap_header_length);
+
+//     printf("type: ");
+//     switch((frame_control >> 2) & 0x3) {
+//         case 0:
+//             printf("management ");
+//             break;
+//         case 1:
+//             printf("control ");
+//             break;
+//         case 2:
+//             printf("data ");
+//             break;
+//     }
+
+//     if(frame_control & 0x0100) printf("to ds ");
+//     if(frame_control & 0x0200) printf("from ds ");
 
     
-    printf("Packet:\n");
-    printf("Byte  Hex   Bin\n");
-    for(int i = 0; i < header->len; i++) {
-        printf("%4i  0x%02x  %s\n", i, packet[i], byte_to_string(packet[i]));
-    }
-}
+//     printf("Packet:\n");
+//     printf("Byte  Hex   Bin\n");
+//     for(int i = 0; i < header->len; i++) {
+//         printf("%4i  0x%02x  %s\n", i, packet[i], byte_to_string(packet[i]));
+//     }
+// }
 
 
-void parse(const u_char *packet) {
-    int present;
-    uint8_t version, pad;
-    uint16_t length;
-    uint32_t flags;
+// void parse(const u_char *packet) {
+//     int present;
+//     uint8_t version, pad;
+//     uint16_t length;
+//     uint32_t flags;
 
-    version = (uint8_t)(packet[0]);
-    pad = (uint8_t)(packet[1]);
-    length = le16toh((uint16_t)(packet[2]));
-    flags = le32toh((uint32_t)(packet[4]));
+//     version = (uint8_t)(packet[0]);
+//     pad = (uint8_t)(packet[1]);
+//     length = le16toh((uint16_t)(packet[2]));
+//     flags = le32toh((uint32_t)(packet[4]));
 
-    printf("Radiotap header length: %i\n", length);
+//     printf("Radiotap header length: %i\n", length);
 
-    printf("Radiotap flags:\n");
+//     printf("Radiotap flags:\n");
 
-    for(int i = 0; i < 32; i++) {
-        present = 1;
-        switch((ieee80211_radiotap_type)(i)) {
-            case IEEE80211_RADIOTAP_TSFT:
-                printf("TSFT");
-                break;
-            case IEEE80211_RADIOTAP_FLAGS:
-                printf("Flags");
-                break;
-            case IEEE80211_RADIOTAP_RATE:
-                printf("Rate");
-                break;
-            case IEEE80211_RADIOTAP_CHANNEL:
-                printf("Channel");
-                break;
-            case IEEE80211_RADIOTAP_FHSS:
-                printf("FHSS");
-                break;
-            case IEEE80211_RADIOTAP_DBM_ANTSIGNAL:
-                printf("dBm Antenna Signal");
-                break;
-            case IEEE80211_RADIOTAP_DBM_ANTNOISE:
-                printf("dBm Antenna Noise");
-                break;
-            case IEEE80211_RADIOTAP_LOCK_QUALITY:
-                printf("Lock Quality");
-                break;
-            case IEEE80211_RADIOTAP_TX_ATTENUATION:
-                printf("Tx Attenuation");
-                break;
-            case IEEE80211_RADIOTAP_DB_TX_ATTENUATION:
-                printf("dB Tx Attenuation");
-                break;
-            case IEEE80211_RADIOTAP_DBM_TX_POWER:
-                printf("dBm Tx Power");
-                break;
-            case IEEE80211_RADIOTAP_ANTENNA:
-                printf("Antenna");
-                break;
-            case IEEE80211_RADIOTAP_DB_ANTSIGNAL:
-                printf("dB Antenna Signal");
-                break;
-            case IEEE80211_RADIOTAP_DB_ANTNOISE:
-                printf("dB Antenna Noise");
-                break;
-            case IEEE80211_RADIOTAP_RX_FLAGS:
-                printf("Rx Flags");
-                break;
-            case IEEE80211_RADIOTAP_TX_FLAGS:
-                printf("Tx Flags");
-                break;
-            case IEEE80211_RADIOTAP_RTS_RETRIES:
-                printf("RTS Retries");
-                break;
-            case IEEE80211_RADIOTAP_DATA_RETRIES:
-                printf("Data Retries");
-                break;
-            case IEEE80211_RADIOTAP_MCS:
-                printf("MCS Information");
-                break;
-            case IEEE80211_RADIOTAP_AMPDU_STATUS:
-                printf("A-MPDU Status");
-                break;
-            case IEEE80211_RADIOTAP_VHT:
-                printf("VHT Information");
-                break;
-            case IEEE80211_RADIOTAP_TIMESTAMP:
-                printf("Timestamp");
-                break;
-            case IEEE80211_RADIOTAP_RADIOTAP_NAMESPACE:
-                printf("Radiotap Namespace");
-                break;
-            case IEEE80211_RADIOTAP_VENDOR_NAMESPACE:
-                printf("Vender Namespace");
-                break;
-            case IEEE80211_RADIOTAP_EXT:
-                printf("Ext");
-                break;
-            default:
-                present = 0;
-                break;
-        }
+//     for(int i = 0; i < 32; i++) {
+//         present = 1;
+//         switch((ieee80211_radiotap_type)(i)) {
+//             case IEEE80211_RADIOTAP_TSFT:
+//                 printf("TSFT");
+//                 break;
+//             case IEEE80211_RADIOTAP_FLAGS:
+//                 printf("Flags");
+//                 break;
+//             case IEEE80211_RADIOTAP_RATE:
+//                 printf("Rate");
+//                 break;
+//             case IEEE80211_RADIOTAP_CHANNEL:
+//                 printf("Channel");
+//                 break;
+//             case IEEE80211_RADIOTAP_FHSS:
+//                 printf("FHSS");
+//                 break;
+//             case IEEE80211_RADIOTAP_DBM_ANTSIGNAL:
+//                 printf("dBm Antenna Signal");
+//                 break;
+//             case IEEE80211_RADIOTAP_DBM_ANTNOISE:
+//                 printf("dBm Antenna Noise");
+//                 break;
+//             case IEEE80211_RADIOTAP_LOCK_QUALITY:
+//                 printf("Lock Quality");
+//                 break;
+//             case IEEE80211_RADIOTAP_TX_ATTENUATION:
+//                 printf("Tx Attenuation");
+//                 break;
+//             case IEEE80211_RADIOTAP_DB_TX_ATTENUATION:
+//                 printf("dB Tx Attenuation");
+//                 break;
+//             case IEEE80211_RADIOTAP_DBM_TX_POWER:
+//                 printf("dBm Tx Power");
+//                 break;
+//             case IEEE80211_RADIOTAP_ANTENNA:
+//                 printf("Antenna");
+//                 break;
+//             case IEEE80211_RADIOTAP_DB_ANTSIGNAL:
+//                 printf("dB Antenna Signal");
+//                 break;
+//             case IEEE80211_RADIOTAP_DB_ANTNOISE:
+//                 printf("dB Antenna Noise");
+//                 break;
+//             case IEEE80211_RADIOTAP_RX_FLAGS:
+//                 printf("Rx Flags");
+//                 break;
+//             case IEEE80211_RADIOTAP_TX_FLAGS:
+//                 printf("Tx Flags");
+//                 break;
+//             case IEEE80211_RADIOTAP_RTS_RETRIES:
+//                 printf("RTS Retries");
+//                 break;
+//             case IEEE80211_RADIOTAP_DATA_RETRIES:
+//                 printf("Data Retries");
+//                 break;
+//             case IEEE80211_RADIOTAP_MCS:
+//                 printf("MCS Information");
+//                 break;
+//             case IEEE80211_RADIOTAP_AMPDU_STATUS:
+//                 printf("A-MPDU Status");
+//                 break;
+//             case IEEE80211_RADIOTAP_VHT:
+//                 printf("VHT Information");
+//                 break;
+//             case IEEE80211_RADIOTAP_TIMESTAMP:
+//                 printf("Timestamp");
+//                 break;
+//             case IEEE80211_RADIOTAP_RADIOTAP_NAMESPACE:
+//                 printf("Radiotap Namespace");
+//                 break;
+//             case IEEE80211_RADIOTAP_VENDOR_NAMESPACE:
+//                 printf("Vender Namespace");
+//                 break;
+//             case IEEE80211_RADIOTAP_EXT:
+//                 printf("Ext");
+//                 break;
+//             default:
+//                 present = 0;
+//                 break;
+//         }
 
-        if(present) {
-            printf(": ");
-            if((flags >> i) & 0x1) {
-                printf("present");
-            } else {
-                printf("absent");
-            }
-            printf("\n");
-        }
-    }
-}
+//         if(present) {
+//             printf(": ");
+//             if((flags >> i) & 0x1) {
+//                 printf("present");
+//             } else {
+//                 printf("absent");
+//             }
+//             printf("\n");
+//         }
+//     }
+// }
 
 
-char * byte_to_string(uint8_t byte) {
-    int i;
-    static char string[9];
+// char * byte_to_string(uint8_t byte) {
+//     int i;
+//     static char string[9];
 
-    for(i = 0; i < 8; i++) {
-        if(i > 3) {
-            if(i == 4) string[i] = ' ';
-            string[i+1] = ((byte >> (7 - i)) & 0x1) + '0';
-        } else {
-            string[i] = ((byte >> (7 - i)) & 0x1) + '0';
-        }
-    }
+//     for(i = 0; i < 8; i++) {
+//         if(i > 3) {
+//             if(i == 4) string[i] = ' ';
+//             string[i+1] = ((byte >> (7 - i)) & 0x1) + '0';
+//         } else {
+//             string[i] = ((byte >> (7 - i)) & 0x1) + '0';
+//         }
+//     }
 
-    return string;
-}
+//     return string;
+// }
 
 
 
